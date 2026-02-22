@@ -23,6 +23,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerRegisterChannelEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.plugin.messaging.PluginMessageListener;
@@ -45,6 +46,10 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
     static final String CHANNEL_DATA_TYPED = "waila:data_typed";
     // Matches RawDataResponsePlayS2CPacket.TYPE.id() → Waila.id("data")
     static final String CHANNEL_DATA_RAW = "waila:data";
+
+    // BadPackets channel sync protocol - required for Fabric clients using BadPackets
+    static final String CHANNEL_BP_SYNC = "badpackets:channel_sync";
+    static final byte BP_SYNC_INITIAL = 0x01;
 
     private final Consumer<String> warnLogger = msg -> getLogger().log(Level.WARNING, msg);
     private final BiConsumer<String, Throwable> errorLogger = (msg, t) -> getLogger().log(Level.SEVERE, msg, t);
@@ -89,6 +94,11 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
 
             Bukkit.getPluginManager().registerEvents(this, this);
 
+            // BadPackets channel sync - must be registered before waila channels so the
+            // Fabric client's BadPackets can discover our channels during the handshake
+            Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_BP_SYNC);
+            Bukkit.getMessenger().registerIncomingPluginChannel(this, CHANNEL_BP_SYNC, this);
+
             // Outgoing channels
             Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_VERSION);
             Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_CONFIG);
@@ -111,6 +121,19 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
         } finally {
             Thread.currentThread().setContextClassLoader(previousClassLoader);
         }
+    }
+
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        // Send BadPackets channel sync to the Fabric client so it registers waila:* channels.
+        // BadPackets on the client only sends minecraft:register for its managed channels AFTER
+        // receiving a badpackets:channel_sync INITIAL packet from the server.
+        // Use a 1-tick delay to ensure the player's network handler is fully ready.
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            if (event.getPlayer().isOnline()) {
+                sendBadPacketsChannelSync(event.getPlayer());
+            }
+        }, 1L);
     }
 
     @EventHandler
@@ -162,11 +185,39 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
 
     @Override
     public void onPluginMessageReceived(@NotNull String channel, @NotNull Player player, byte @NotNull [] message) {
-        getLogger().info("[WTHIT] Received data request on " + channel + " from " + player.getName() + " (" + message.length + " bytes)");
+        getLogger().info("[WTHIT] Received plugin message on " + channel + " from " + player.getName() + " (" + message.length + " bytes)");
         switch (channel) {
+            case CHANNEL_BP_SYNC -> getLogger().info("[WTHIT] Received BadPackets channel sync from " + player.getName());
             case CHANNEL_BLOCK -> dataHandler.handleBlockRequest(player, message);
             case CHANNEL_ENTITY -> dataHandler.handleEntityRequest(player, message);
         }
+    }
+
+    /**
+     * Sends a BadPackets channel_sync INITIAL packet to the client, advertising all waila:* channels.
+     * This is required because BadPackets on the Fabric client only registers channels via
+     * minecraft:register AFTER it receives this sync from the server.
+     *
+     * Wire format: [byte: 0x01] [varint: namespace_count] [for each: utf namespace, varint path_count, [utf path...]]
+     */
+    private void sendBadPacketsChannelSync(Player player) {
+        ByteArrayDataOutput out = ByteStreams.newDataOutput();
+        out.writeByte(BP_SYNC_INITIAL);
+
+        // All channels are in the "waila" namespace
+        writeVarInt(out, 1); // 1 namespace group
+        writeUtf(out, "waila");
+        writeVarInt(out, 7); // 7 channel paths
+        writeUtf(out, "version");
+        writeUtf(out, "config");
+        writeUtf(out, "blacklist");
+        writeUtf(out, "block");
+        writeUtf(out, "entity");
+        writeUtf(out, "data_typed");
+        writeUtf(out, "data");
+
+        player.sendPluginMessage(this, CHANNEL_BP_SYNC, out.toByteArray());
+        getLogger().info("[WTHIT] Sent BadPackets channel sync to " + player.getName());
     }
 
     static void writeVarInt(ByteArrayDataOutput out, int i) {
