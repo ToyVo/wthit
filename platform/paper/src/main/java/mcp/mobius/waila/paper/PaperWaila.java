@@ -16,6 +16,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.reflect.TypeToken;
 import mcp.mobius.waila.mcless.config.ConfigIo;
+import mcp.mobius.waila.plugin.PluginInfo;
 import mcp.mobius.waila.plugin.PluginLoader;
 import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
@@ -101,6 +102,12 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
 
             // Initialize the WTHIT plugin system - loads data providers
             PluginLoader.INSTANCE.loadPlugins();
+
+            var plugins = PluginInfo.getAll();
+            getLogger().info("[WTHIT] Loaded " + plugins.size() + " plugins:");
+            for (var info : plugins) {
+                getLogger().info("[WTHIT]   " + info.getPluginId() + " (enabled=" + info.isEnabled() + ")");
+            }
         } finally {
             Thread.currentThread().setContextClassLoader(previousClassLoader);
         }
@@ -110,11 +117,13 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
     @SuppressWarnings("UnstableApiUsage")
     public void onPlayerRegisterChannelEvent(PlayerRegisterChannelEvent event) {
         Player player = event.getPlayer();
+        getLogger().info("[WTHIT] Channel registered: " + event.getChannel() + " by " + player.getName());
 
         if (event.getChannel().equals(CHANNEL_VERSION)) {
             ByteArrayDataOutput out = ByteStreams.newDataOutput();
             writeVarInt(out, NETWORK_VERSION);
             player.sendPluginMessage(this, CHANNEL_VERSION, out.toByteArray());
+            getLogger().info("[WTHIT] Sent version packet (v" + NETWORK_VERSION + ") to " + player.getName());
         }
 
         if (event.getChannel().equals(CHANNEL_BLACKLIST)) {
@@ -123,6 +132,7 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
             writeNamespacedKeys(out, blacklistConfig.blockEntityTypes);
             writeNamespacedKeys(out, blacklistConfig.entityTypes);
             player.sendPluginMessage(this, CHANNEL_BLACKLIST, out.toByteArray());
+            getLogger().info("[WTHIT] Sent blacklist packet to " + player.getName());
         }
 
         if (event.getChannel().equals(CHANNEL_CONFIG)) {
@@ -146,11 +156,13 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
                 });
             });
             player.sendPluginMessage(this, CHANNEL_CONFIG, out.toByteArray());
+            getLogger().info("[WTHIT] Sent config packet (" + pluginConfig.size() + " namespaces) to " + player.getName());
         }
     }
 
     @Override
     public void onPluginMessageReceived(@NotNull String channel, @NotNull Player player, byte @NotNull [] message) {
+        getLogger().info("[WTHIT] Received data request on " + channel + " from " + player.getName() + " (" + message.length + " bytes)");
         switch (channel) {
             case CHANNEL_BLOCK -> dataHandler.handleBlockRequest(player, message);
             case CHANNEL_ENTITY -> dataHandler.handleEntityRequest(player, message);

@@ -33,6 +33,11 @@ public class PaperCommonService implements ICommonService {
                 return Optional.of(new ModInfo(true, "wthit", plugin.getName(), plugin.getDescription().getVersion()));
             }
         }
+
+        if (namespace.equals("minecraft")) {
+            return Optional.of(new ModInfo(true, "minecraft", "Minecraft", Bukkit.getMinecraftVersion()));
+        }
+
         return Optional.empty();
     }
 
