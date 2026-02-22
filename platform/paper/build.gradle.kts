@@ -8,9 +8,14 @@ repositories {
     maven("https://repo.papermc.io/repository/maven-public/")
 }
 
+val badpacketsApi: Configuration by configurations.creating {
+    isTransitive = false
+}
+
 dependencies {
     paperweight.paperDevBundle("${rootProp["minecraft"]}-R0.1-SNAPSHOT")
     compileOnly("lol.bai:badpackets:mojmap-${rootProp["badpackets"]}")
+    badpacketsApi("lol.bai:badpackets:mojmap-${rootProp["badpackets"]}")
 }
 
 sourceSets {
@@ -38,5 +43,11 @@ tasks {
         rootProject.extensions.getByType<SourceSetContainer>()
             .filter { it.name != "mixin" && it.name != "buildConst" && it.name != "test" }
             .forEach { from(it.output) }
+
+        // Bundle BadPackets API classes — needed at runtime because Paper doesn't have BadPackets as a mod,
+        // but root project classes (DataWriter, Packets, etc.) reference BadPackets types in method signatures.
+        from(badpacketsApi.map { if (it.isDirectory) it else zipTree(it) }) {
+            include("lol/bai/badpackets/api/**")
+        }
     }
 }
