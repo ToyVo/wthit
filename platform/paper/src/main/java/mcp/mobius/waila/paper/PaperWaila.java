@@ -78,23 +78,32 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
 
     @Override
     public void onEnable() {
-        dataHandler = new PaperDataHandler(this);
+        // ServiceLoader.load() uses the thread context classloader, which on Paper's plugin system
+        // is not the plugin classloader. Swap it for the entire onEnable so that ServiceLoader can
+        // find our services (ICommonService, PluginLoader, etc.) in the plugin JAR.
+        var previousClassLoader = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
+        try {
+            dataHandler = new PaperDataHandler(this);
 
-        Bukkit.getPluginManager().registerEvents(this, this);
+            Bukkit.getPluginManager().registerEvents(this, this);
 
-        // Outgoing channels
-        Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_VERSION);
-        Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_CONFIG);
-        Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_BLACKLIST);
-        Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_DATA_TYPED);
-        Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_DATA_RAW);
+            // Outgoing channels
+            Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_VERSION);
+            Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_CONFIG);
+            Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_BLACKLIST);
+            Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_DATA_TYPED);
+            Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_DATA_RAW);
 
-        // Incoming channels
-        Bukkit.getMessenger().registerIncomingPluginChannel(this, CHANNEL_BLOCK, this);
-        Bukkit.getMessenger().registerIncomingPluginChannel(this, CHANNEL_ENTITY, this);
+            // Incoming channels
+            Bukkit.getMessenger().registerIncomingPluginChannel(this, CHANNEL_BLOCK, this);
+            Bukkit.getMessenger().registerIncomingPluginChannel(this, CHANNEL_ENTITY, this);
 
-        // Initialize the WTHIT plugin system - loads data providers
-        PluginLoader.INSTANCE.loadPlugins();
+            // Initialize the WTHIT plugin system - loads data providers
+            PluginLoader.INSTANCE.loadPlugins();
+        } finally {
+            Thread.currentThread().setContextClassLoader(previousClassLoader);
+        }
     }
 
     @EventHandler
