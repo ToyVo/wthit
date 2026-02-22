@@ -23,6 +23,7 @@ sourceSets {
     val rootSourceSets = rootProject.extensions.getByType<SourceSetContainer>()
 
     main.apply {
+        resources.srcDir(rootProject.file("src/resources/resources"))
         rootSourceSets.forEach {
             compileClasspath += it.output
             runtimeClasspath += it.output
