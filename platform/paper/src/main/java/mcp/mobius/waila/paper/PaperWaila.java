@@ -1,28 +1,20 @@
 package mcp.mobius.waila.paper;
 
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 import com.google.common.io.ByteArrayDataOutput;
 import com.google.common.io.ByteStreams;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonPrimitive;
-import com.google.gson.reflect.TypeToken;
-import mcp.mobius.waila.mcless.config.ConfigIo;
+import mcp.mobius.waila.Waila;
+import mcp.mobius.waila.config.ConfigEntry;
+import mcp.mobius.waila.config.PluginConfig;
 import mcp.mobius.waila.plugin.PluginInfo;
 import mcp.mobius.waila.plugin.PluginLoader;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.DiscardedPayload;
 import net.minecraft.resources.Identifier;
 import org.bukkit.Bukkit;
-import org.bukkit.NamespacedKey;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -35,6 +27,7 @@ import org.jetbrains.annotations.NotNull;
 
 import static mcp.mobius.waila.mcless.network.NetworkConstants.CONFIG_BOOL;
 import static mcp.mobius.waila.mcless.network.NetworkConstants.CONFIG_DOUBLE;
+import static mcp.mobius.waila.mcless.network.NetworkConstants.CONFIG_INT;
 import static mcp.mobius.waila.mcless.network.NetworkConstants.CONFIG_STRING;
 import static mcp.mobius.waila.mcless.network.NetworkConstants.NETWORK_VERSION;
 
@@ -55,36 +48,7 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
     static final String CHANNEL_BP_SYNC = "badpackets:channel_sync";
     static final byte BP_SYNC_INITIAL = 0x01;
 
-    private final Consumer<String> warnLogger = msg -> getLogger().log(Level.WARNING, msg);
-    private final BiConsumer<String, Throwable> errorLogger = (msg, t) -> getLogger().log(Level.SEVERE, msg, t);
-
-    private final ConfigIo<Map<String, Map<String, JsonPrimitive>>> pluginConfigIo = new ConfigIo<>(
-        warnLogger, errorLogger,
-        false, () -> path -> null,
-        new GsonBuilder().setPrettyPrinting().create(),
-        new TypeToken<Map<String, Map<String, JsonPrimitive>>>() {
-        }.getType(),
-        LinkedHashMap::new);
-
-    private final ConfigIo<BlacklistConfig> blacklistConfigIo = new ConfigIo<>(
-        warnLogger, errorLogger,
-        false, () -> path -> null,
-        new GsonBuilder()
-            .setPrettyPrinting()
-            .registerTypeAdapter(NamespacedKey.class, new NamespacedKeySerializer())
-            .create(),
-        BlacklistConfig.class,
-        BlacklistConfig::new);
-
-    private Map<String, Map<String, JsonPrimitive>> pluginConfig;
-    private BlacklistConfig blacklistConfig;
     private PaperDataHandler dataHandler;
-
-    @Override
-    public void onLoad() {
-        pluginConfig = pluginConfigIo.read(getDataFolder().toPath().resolve("waila_plugins.json"));
-        blacklistConfig = blacklistConfigIo.read(getDataFolder().toPath().resolve("blacklist.json"));
-    }
 
     @Override
     public void onEnable() {
@@ -113,7 +77,8 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
             Bukkit.getMessenger().registerIncomingPluginChannel(this, CHANNEL_BLOCK, this);
             Bukkit.getMessenger().registerIncomingPluginChannel(this, CHANNEL_ENTITY, this);
 
-            // Initialize the WTHIT plugin system - loads data providers
+            // Initialize the WTHIT plugin system - loads data providers, populates PluginConfig
+            // and Waila.BLACKLIST_CONFIG with registered values.
             PluginLoader.INSTANCE.loadPlugins();
 
             var plugins = PluginInfo.getAll();
@@ -153,36 +118,61 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
         }
 
         if (event.getChannel().equals(CHANNEL_BLACKLIST)) {
+            // Use WTHIT's own blacklist config (populated during loadPlugins) instead of a
+            // custom config file. Wire format matches BlacklistSyncCommonS2CPacket.CODEC:
+            // three flat string sets (blocks, blockEntityTypes, entityTypes).
+            var blacklist = Waila.BLACKLIST_CONFIG.get();
             ByteArrayDataOutput out = ByteStreams.newDataOutput();
-            writeNamespacedKeys(out, blacklistConfig.blocks);
-            writeNamespacedKeys(out, blacklistConfig.blockEntityTypes);
-            writeNamespacedKeys(out, blacklistConfig.entityTypes);
+            writeStringSet(out, blacklist.blocks);
+            writeStringSet(out, blacklist.blockEntityTypes);
+            writeStringSet(out, blacklist.entityTypes);
             player.sendPluginMessage(this, CHANNEL_BLACKLIST, out.toByteArray());
-            getLogger().info("[WTHIT] Sent blacklist packet to " + player.getName());
+            getLogger().info("[WTHIT] Sent blacklist packet (" + blacklist.blocks.size() + " blocks, "
+                + blacklist.blockEntityTypes.size() + " block entities, "
+                + blacklist.entityTypes.size() + " entities) to " + player.getName());
         }
 
         if (event.getChannel().equals(CHANNEL_CONFIG)) {
+            // Use PluginConfig.getSyncableConfigs() to build the config packet, matching
+            // exactly what the Fabric server does in ConfigSyncCommonS2CPacket.Payload().
+            // This ensures the client receives proper server values for all synced configs
+            // (e.g. featureConfig entries like wailax:item.enabled_block default to true).
+            var syncableConfigs = PluginConfig.getSyncableConfigs().stream()
+                .filter(it -> it.getOrigin().isEnabled())
+                .collect(Collectors.toMap(ConfigEntry::getId, ConfigEntry::getLocalValue));
+
+            var groups = syncableConfigs.keySet().stream()
+                .collect(Collectors.groupingBy(Identifier::getNamespace));
+
             ByteArrayDataOutput out = ByteStreams.newDataOutput();
-            writeVarInt(out, pluginConfig.size());
-            pluginConfig.forEach((namespace, map) -> {
+            writeVarInt(out, groups.size());
+            groups.forEach((namespace, entries) -> {
                 writeUtf(out, namespace);
-                writeVarInt(out, map.size());
-                map.forEach((key, value) -> {
-                    writeUtf(out, key);
-                    if (value.isBoolean()) {
+                writeVarInt(out, entries.size());
+                entries.forEach(e -> {
+                    writeUtf(out, e.getPath());
+                    var v = syncableConfigs.get(e);
+                    if (v instanceof Boolean z) {
                         out.writeByte(CONFIG_BOOL);
-                        out.writeBoolean(value.getAsBoolean());
-                    } else if (value.isNumber()) {
+                        out.writeBoolean(z);
+                    } else if (v instanceof Integer i) {
+                        out.writeByte(CONFIG_INT);
+                        writeVarInt(out, i);
+                    } else if (v instanceof Double d) {
                         out.writeByte(CONFIG_DOUBLE);
-                        out.writeDouble(value.getAsDouble());
-                    } else {
+                        out.writeDouble(d);
+                    } else if (v instanceof String str) {
                         out.writeByte(CONFIG_STRING);
-                        writeUtf(out, value.getAsString());
+                        writeUtf(out, str);
+                    } else if (v instanceof Enum<?> en) {
+                        out.writeByte(CONFIG_STRING);
+                        writeUtf(out, en.name());
                     }
                 });
             });
             player.sendPluginMessage(this, CHANNEL_CONFIG, out.toByteArray());
-            getLogger().info("[WTHIT] Sent config packet (" + pluginConfig.size() + " namespaces) to " + player.getName());
+            getLogger().info("[WTHIT] Sent config packet (" + syncableConfigs.size() + " entries, "
+                + groups.size() + " namespaces) to " + player.getName());
         }
     }
 
@@ -250,14 +240,11 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
         }
     }
 
-    private static void writeNamespacedKeys(ByteArrayDataOutput out, Set<NamespacedKey> keySet) {
-        Map<String, List<NamespacedKey>> groups = keySet.stream().collect(Collectors.groupingBy(NamespacedKey::getNamespace));
-        writeVarInt(out, groups.size());
-        groups.forEach((namespace, keys) -> {
-            writeUtf(out, namespace);
-            writeVarInt(out, keys.size());
-            keys.forEach(key -> writeUtf(out, key.getKey()));
-        });
+    private static void writeStringSet(ByteArrayDataOutput out, Set<String> set) {
+        writeVarInt(out, set.size());
+        for (var s : set) {
+            writeUtf(out, s);
+        }
     }
 
 }
