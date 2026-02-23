@@ -108,13 +108,10 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
     @SuppressWarnings("UnstableApiUsage")
     public void onPlayerRegisterChannelEvent(PlayerRegisterChannelEvent event) {
         Player player = event.getPlayer();
-        getLogger().info("[WTHIT] Channel registered: " + event.getChannel() + " by " + player.getName());
-
         if (event.getChannel().equals(CHANNEL_VERSION)) {
             ByteArrayDataOutput out = ByteStreams.newDataOutput();
             writeVarInt(out, NETWORK_VERSION);
             player.sendPluginMessage(this, CHANNEL_VERSION, out.toByteArray());
-            getLogger().info("[WTHIT] Sent version packet (v" + NETWORK_VERSION + ") to " + player.getName());
         }
 
         if (event.getChannel().equals(CHANNEL_BLACKLIST)) {
@@ -127,9 +124,6 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
             writeStringSet(out, blacklist.blockEntityTypes);
             writeStringSet(out, blacklist.entityTypes);
             player.sendPluginMessage(this, CHANNEL_BLACKLIST, out.toByteArray());
-            getLogger().info("[WTHIT] Sent blacklist packet (" + blacklist.blocks.size() + " blocks, "
-                + blacklist.blockEntityTypes.size() + " block entities, "
-                + blacklist.entityTypes.size() + " entities) to " + player.getName());
         }
 
         if (event.getChannel().equals(CHANNEL_CONFIG)) {
@@ -171,16 +165,12 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
                 });
             });
             player.sendPluginMessage(this, CHANNEL_CONFIG, out.toByteArray());
-            getLogger().info("[WTHIT] Sent config packet (" + syncableConfigs.size() + " entries, "
-                + groups.size() + " namespaces) to " + player.getName());
         }
     }
 
     @Override
     public void onPluginMessageReceived(@NotNull String channel, @NotNull Player player, byte @NotNull [] message) {
-        getLogger().info("[WTHIT] Received plugin message on " + channel + " from " + player.getName() + " (" + message.length + " bytes)");
         switch (channel) {
-            case CHANNEL_BP_SYNC -> getLogger().info("[WTHIT] Received BadPackets channel sync from " + player.getName());
             case CHANNEL_BLOCK -> dataHandler.handleBlockRequest(player, message);
             case CHANNEL_ENTITY -> dataHandler.handleEntityRequest(player, message);
         }
@@ -219,7 +209,6 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
             new DiscardedPayload(Identifier.parse(CHANNEL_BP_SYNC), out.toByteArray())
         );
         nmsPlayer.connection.send(packet);
-        getLogger().info("[WTHIT] Sent BadPackets channel sync to " + player.getName());
     }
 
     static void writeVarInt(ByteArrayDataOutput out, int i) {

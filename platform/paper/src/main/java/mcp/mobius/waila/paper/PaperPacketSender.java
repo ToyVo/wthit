@@ -56,7 +56,6 @@ public class PaperPacketSender implements PacketSender {
             var buf = new FriendlyByteBuf(Unpooled.buffer());
             try {
                 buf.writeNbt(rawPayload.data());
-                logger.info("[WTHIT] Sending raw data (" + buf.readableBytes() + " bytes) to " + bukkitPlayer.getName());
                 sendBytes(PaperWaila.CHANNEL_DATA_RAW, buf);
             } finally {
                 buf.release();
@@ -66,7 +65,6 @@ public class PaperPacketSender implements PacketSender {
             var buf = new RegistryFriendlyByteBuf(Unpooled.buffer(), registryAccess);
             try {
                 DataType.CODEC.encode(buf, typedPayload.data());
-                logger.info("[WTHIT] Sending typed data " + typedPayload.data().type().id() + " (" + buf.readableBytes() + " bytes) to " + bukkitPlayer.getName());
                 sendBytes(PaperWaila.CHANNEL_DATA_TYPED, buf);
             } finally {
                 buf.release();
