@@ -18,8 +18,12 @@ import com.google.gson.reflect.TypeToken;
 import mcp.mobius.waila.mcless.config.ConfigIo;
 import mcp.mobius.waila.plugin.PluginInfo;
 import mcp.mobius.waila.plugin.PluginLoader;
+import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.custom.DiscardedPayload;
+import net.minecraft.resources.Identifier;
 import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
+import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -94,9 +98,8 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
 
             Bukkit.getPluginManager().registerEvents(this, this);
 
-            // BadPackets channel sync - must be registered before waila channels so the
-            // Fabric client's BadPackets can discover our channels during the handshake
-            Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL_BP_SYNC);
+            // BadPackets channel sync - register incoming to receive the client's response.
+            // Outgoing sync is sent via NMS (bypasses Bukkit's channel check).
             Bukkit.getMessenger().registerIncomingPluginChannel(this, CHANNEL_BP_SYNC, this);
 
             // Outgoing channels
@@ -194,10 +197,14 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
     }
 
     /**
-     * Sends a BadPackets channel_sync INITIAL packet to the client, advertising all waila:* channels.
+     * Sends a BadPackets channel_sync INITIAL packet to the client via NMS, advertising all waila:* channels.
      * This is required because BadPackets on the Fabric client only registers channels via
      * minecraft:register AFTER it receives this sync from the server.
-     *
+     * <p>
+     * Must bypass Bukkit's {@code sendPluginMessage} because Bukkit silently drops messages
+     * to channels the client hasn't registered yet — but the whole point of this packet is to
+     * trigger that registration.
+     * <p>
      * Wire format: [byte: 0x01] [varint: namespace_count] [for each: utf namespace, varint path_count, [utf path...]]
      */
     private void sendBadPacketsChannelSync(Player player) {
@@ -216,7 +223,12 @@ public class PaperWaila extends JavaPlugin implements Listener, PluginMessageLis
         writeUtf(out, "data_typed");
         writeUtf(out, "data");
 
-        player.sendPluginMessage(this, CHANNEL_BP_SYNC, out.toByteArray());
+        // Send directly via NMS to bypass Bukkit's channel registration check
+        var nmsPlayer = ((CraftPlayer) player).getHandle();
+        var packet = new ClientboundCustomPayloadPacket(
+            new DiscardedPayload(Identifier.parse(CHANNEL_BP_SYNC), out.toByteArray())
+        );
+        nmsPlayer.connection.send(packet);
         getLogger().info("[WTHIT] Sent BadPackets channel sync to " + player.getName());
     }
 
