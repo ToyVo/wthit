@@ -10,7 +10,7 @@
 
   "waila:vanilla": {
     "entrypoints": {
-      "common": "mcp.mobius.waila.plugin.vanilla.VanillaCommonPlugin",
+      "common": "mcp.mobius.waila.paper.PaperVanillaCommonPlugin",
       "client": "mcp.mobius.waila.plugin.vanilla.VanillaClientPlugin"
     },
     "side"       : "*",

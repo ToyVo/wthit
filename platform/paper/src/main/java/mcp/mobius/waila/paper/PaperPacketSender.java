@@ -1,5 +1,7 @@
 package mcp.mobius.waila.paper;
 
+import java.util.logging.Logger;
+
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import lol.bai.badpackets.api.PacketSender;
@@ -29,11 +31,13 @@ public class PaperPacketSender implements PacketSender {
     private final Plugin plugin;
     private final Player bukkitPlayer;
     private final ServerPlayer serverPlayer;
+    private final Logger logger;
 
     public PaperPacketSender(Plugin plugin, Player bukkitPlayer, ServerPlayer serverPlayer) {
         this.plugin = plugin;
         this.bukkitPlayer = bukkitPlayer;
         this.serverPlayer = serverPlayer;
+        this.logger = plugin.getLogger();
     }
 
     @Override
@@ -52,6 +56,7 @@ public class PaperPacketSender implements PacketSender {
             var buf = new FriendlyByteBuf(Unpooled.buffer());
             try {
                 buf.writeNbt(rawPayload.data());
+                logger.info("[WTHIT] Sending raw data (" + buf.readableBytes() + " bytes) to " + bukkitPlayer.getName());
                 sendBytes(PaperWaila.CHANNEL_DATA_RAW, buf);
             } finally {
                 buf.release();
@@ -61,10 +66,13 @@ public class PaperPacketSender implements PacketSender {
             var buf = new RegistryFriendlyByteBuf(Unpooled.buffer(), registryAccess);
             try {
                 DataType.CODEC.encode(buf, typedPayload.data());
+                logger.info("[WTHIT] Sending typed data " + typedPayload.data().type().id() + " (" + buf.readableBytes() + " bytes) to " + bukkitPlayer.getName());
                 sendBytes(PaperWaila.CHANNEL_DATA_TYPED, buf);
             } finally {
                 buf.release();
             }
+        } else {
+            logger.warning("[WTHIT] Unknown payload type: " + payload.getClass().getName());
         }
     }
 
